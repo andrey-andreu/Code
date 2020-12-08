@@ -8,6 +8,7 @@
 #include <limits.h>
 #include <fcntl.h>
 #include <wait.h>
+#include <signal.h>
 
 #define LEN 10
 
@@ -19,11 +20,10 @@
 
 char*** mascom = NULL;
 char** masfile = NULL;
-char*** masmas = NULL;
-char** mas = NULL;
+int* maspid = NULL;
 int new_out;
 int new_in;
-int flagV = 0, flagV2 = 0, fstikc = 0, stcount = 0, next = 0, flagfile = 0, fd[2], one = 1;
+int flagV = 0, flagV2 = 0, fstikc = 0, stcount = 0, flagfile = 0, fd[2], one = 1, lenp = -1, amper = 0, h = 0;
 
 void printdir(void){
     char* path = NULL;
@@ -42,56 +42,30 @@ void cdcom(char **mas){
     else if (chdir(mas[1]) == -1) perror("Child's error");
 }
 
-char** free_mas(void){
-    int j = 0;
-    if (mas){
-        while (mas[j] != NULL){
-            free(mas[j]);
-            mas[j] = NULL;
-            j++;
-        }
-        free(mas);
-        mas = NULL;
-    }
-return mas;
-}
-
-char*** free_masmas(void){
-    int i = 0, j = 0;
-    if (masmas){
-        while (masmas[i] != NULL){
-            while (masmas[i][j] != NULL){
-                free(masmas[i][j]);
-                masmas[i][j] = NULL;
-                j++;
-            }
-        }
-    }
-return masmas;
-}
-
 void free_masfile(int k){
     int i;
-    for (i = 0; i < k; i++){
-        if (masfile[i]) free(masfile[i]);
-        masfile[i] = NULL;
+    for (i = 0; i <= k; i++){
+        if (masfile[i] != NULL){ 
+            free(masfile[i]);
+            masfile[i] = NULL;
+        }
     }
     free(masfile);
     masfile = NULL;
 }
 
-void free_mascom(int l){
+void free_mascom(int l, int* r){
     int i = 0, j = 0;
     for (i = 0; i <= l; i++){
-        j = 0;
-        while (mascom[i][j] != NULL){
+        for (j = 0; j <= r[i]; j++){
             free(mascom[i][j]);
             mascom[i][j] = NULL;
-            j++;
         }
         free(mascom[i]);
+        mascom[i] = NULL;
     }
     if (mascom) free(mascom);
+    mascom = NULL;
 }
 
 void vcom(char v, char *masfile){
@@ -132,38 +106,78 @@ void vclose(char v, int old_out, int old_in){
     }
 }
 
-void ret_in(int old_in){
-    close(0);
-    dup2(old_in, 0);
-    close(old_in);
-    old_in = dup(0);
+void sigint(int sig){
+    printf("%c", '\n');
 }
 
-void ret_out(int old_out){
-    close(1);
-    dup2(old_out, 1);
-    close(old_out);
-    old_out = dup(1);
+void checkchild(int sgn){
+    pid_t pid2;
+    int status = 0;
+    int j, i, l, found, masempty = 1;
+
+    while ((pid2 = waitpid(-1, &status, WNOHANG)) > 0){                     
+        i = j = l = found = 0;
+        for (j = 0; j <= lenp; j++){
+            if (maspid[j] == pid2){
+                l = j;
+                found = 1;
+                break;
+            }
+        }
+        if (found){
+            found = 0;
+            if(WIFEXITED(status))
+                printf("\n[%d]+ Done\t %d\t status=%d\n", l, maspid[l], WEXITSTATUS (status));
+            else if(WIFSIGNALED (status))
+                printf("\n[%d]+ Killed\t %d\t status=%d\n", l, maspid[l], WEXITSTATUS (status)); 
+            else if(WIFSTOPPED(status))
+                printf("\n[%d]+ Stopped\t %d\t status=%d\n", l, maspid[l], WEXITSTATUS (status));
+            maspid[l] = -1;
+            for (i = 0; i <= lenp; i++){
+                if (maspid[i] > 0){
+                    masempty = 0;
+                    break;
+                }
+            }
+            if (masempty){
+                lenp = -1;
+                free(maspid);
+                maspid = NULL;
+            }
+        }
+    }
 }
 
 int main(int argc, char* argv[]){
-    int c, j = 0, i = 0, flag = 0, len = 0, k = 0, l = 0, err = 0, first = 1, next = 0, flagf = 0, p = 0;
-    int old_stcount = -1;
+    int c, j = 0, i = 0, flag = 0, len = 0, err = 0, first = 1, flagf = 0, p = 0, status2 = 0;
+    pid_t pid = 1;
     char* vv = NULL;
+    int old_stcount = -1;
     char* word = NULL;
+    int *lencom = NULL;
     char v = '0';
     int old_in = dup(0);
     int old_out = dup(1);
     int fd[2];
 
+    signal(SIGINT, sigint);
+    signal (SIGCHLD, checkchild);
+    checkchild(7);
     printdir();
     c = getchar();
     while (c != EOF){
-        while (c == '\n'){ 
-            printdir();
+        while ((c == '\n') || ((c == ' '))){ 
+            if (c == '\n') printdir();
             c = getchar();
-        }
+        } 
+        if (c == EOF) break;
         i = 0;
+        lencom = malloc(sizeof(int) + 1);
+        lencom[0] = 0;
+        mascom = malloc(sizeof(char**) + 2);
+        mascom[0] = NULL;
+        masfile = malloc(sizeof(char*) + 2);
+        masfile[0] = NULL;
         while ((c != '\n') && (c != EOF)){
             while (c == ' ') c = getchar();
             if (c == '"'){
@@ -212,50 +226,59 @@ int main(int argc, char* argv[]){
                         }
                         break;
                     }
+                    if (c == '&') {
+                        amper = 1;
+                        c = getchar();
+                        break;
+                    }
                     word[j++] = c;
                     if (j >= len-1){
                         len += LEN;
                         word = realloc(word, len);
                     }
                     c = getchar();
-                    if (c == ' ') next = 0;
                 }
+            }
+            if (amper && (c != '\n')) {
+                perror("This symbol '&' mast be in end");
+                amper = 0;
             }
             if (j != 0) {
                 word[j] = '\0';
                 if (strcmp(word, "exit") == 0) flag = 1;
-                    mas = realloc(mas, sizeof(char*)*(i+1));
-                    mas[i] = malloc(strlen(word)+1);
-                    strcpy(mas[i], word);
+                mascom[stcount] = realloc(mascom[stcount], sizeof(char*)*(i+2));
+                mascom[stcount][i] = malloc(strlen(word)+1);
+                strcpy(mascom[stcount][i], word);
             }
             if (flagf == 0){
                 i++;
-                mas = realloc(mas, sizeof(char*)*(i + 1));
-                mas[i] = NULL;
-                mascom = realloc(mascom, sizeof(*mascom)*(stcount + 1));
-                mascom[stcount] = mas;
+                mascom[stcount] = realloc(mascom[stcount], sizeof(char*)*(i + 2));
+                mascom[stcount][i] = NULL;
                 if (old_stcount != stcount){
-                    masfile = realloc(masfile, sizeof(masfile)*(stcount + 1));
+                    masfile = realloc(masfile, sizeof(char*)*(stcount + 2));
                     masfile[stcount] = NULL;
                 }
             }
             else{
-                masfile = realloc(masfile, sizeof(masfile)*(stcount + 1));
-                masfile[stcount] = malloc(strlen(word)+1);
-                strcpy(masfile[stcount], word);
+                masfile = realloc(masfile, sizeof(char*)*(stcount + 2));
+                masfile[stcount] = NULL;
+                if (j != 0) {
+                    masfile[stcount] = malloc(strlen(word)+2);
+                    strcpy(masfile[stcount], word);
+                }
                 old_stcount = stcount;
                 flagf = 0;
                 flagV = 0;
-            } 
-            vv = realloc(vv, sizeof(char)*(stcount + 1));
-            //printf("%d ", stcount);
+            }
+            vv = realloc(vv, sizeof(char)*(stcount + 2));
             vv[stcount] = v;
-            /*printf("%c", vv[stcount]);
-            printf("%s ", masfile[stcount]);
-            printf("%s\n", mascom[stcount][0]);*/
+            lencom[stcount] = i;
             if (fstikc){
                 stcount++;
-                mas = NULL;
+                lencom = realloc(lencom, sizeof(int)*(stcount + 2));
+                lencom[stcount] = 0;
+                mascom = realloc(mascom, sizeof(char**)*(stcount + 2));
+                mascom[stcount] = NULL;
                 i = 0;
                 fstikc = 0;
             }
@@ -266,13 +289,17 @@ int main(int argc, char* argv[]){
         }
         flagf = 0;
         if (flag){
-            mas = NULL;
-            if (mascom != NULL) free_mascom(stcount);
+            if (vv) free(vv);
+            vv = NULL;
+            if (mascom != NULL) free_mascom(stcount, lencom);
+            if (masfile != NULL) free_masfile(stcount);
+            free(lencom);
+            lencom = NULL;
             mascom = NULL;
             masfile = NULL;
-            exit(0);
-        }
-        printf("!!%d!!\n!!", flagV2);
+            free(maspid);
+            return 0;
+        } 
         if (mascom != NULL){
             for (p = 0; p <= stcount; p++){
                 if (mascom[p] != NULL){
@@ -281,8 +308,8 @@ int main(int argc, char* argv[]){
                         else if (chdir(mascom[p][1]) == -1) perror("Child's error");
                     }
                     else{
-                        if (masfile) 
-                            if (masfile[p]) vcom(vv[p], masfile[p]);
+                        if (masfile != NULL) 
+                            if (masfile[p] != NULL) vcom(vv[p], masfile[p]);
                         if(!first) {
                             first = 1;
                             close(0);
@@ -296,13 +323,31 @@ int main(int argc, char* argv[]){
                             dup2(fd[1], 1);
                             close(fd[1]);
                         }
-                        if (fork() == 0){
+                        if ((pid = fork()) == 0){
+                            if (amper) signal (SIGCHLD, checkchild);
+                            else signal(SIGINT, SIG_DFL);
                             execvp(mascom[p][0], mascom[p]);
                             perror("Execvp's error");
+                            if (vv) free(vv);
+                            vv = NULL;
+                            if (mascom != NULL) free_mascom(stcount, lencom);
+                            if (masfile != NULL) free_masfile(stcount);
+                            free(lencom);
+                            free(maspid);
+                            exit(22); 
                         }
-                        else wait(NULL);
-                        if (masfile) 
-                            if (masfile[p]) vclose(vv[p], old_out, old_in);;
+                        else {
+                            if (amper) {
+                                amper = 0;
+                                lenp++;
+                                maspid = realloc(maspid, sizeof(int)*(lenp + 1));
+                                maspid[lenp] = pid;
+                                printf("[%d] %d\n", lenp, maspid[lenp]);
+                            }
+                            else waitpid(pid, NULL, 0);
+                        }
+                        if (masfile != NULL) 
+                            if (masfile[p] != NULL) vclose(vv[p], old_out, old_in);
                     }
                 }
                 if (stcount){
@@ -317,20 +362,23 @@ int main(int argc, char* argv[]){
                 }
             }
         }
-        mas = NULL;
         if (vv) free(vv);
         vv = NULL;
-        if (mascom != NULL) free_mascom(stcount);
+        if (mascom != NULL) free_mascom(stcount, lencom);
         if (masfile != NULL) free_masfile(stcount);
+        free(lencom);
+        lencom = NULL;
         mascom = NULL;
         masfile = NULL;
         i = 0;
-        k = 0;
         v = '0';
         stcount = 0;
+        old_stcount = -1;
         fstikc = 0;
         first = 1;
+        amper = 0;
     }
+    free(maspid);
     if (c == EOF) printf("%s", "exit\n");
     return 0;
 }
