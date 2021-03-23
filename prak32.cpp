@@ -41,10 +41,11 @@ class Student {
         int get_count() const {return count;}
 
         string get_name()const {
-            string n;
-            for (int i = 0; i < name_count; i++){
-                n.push_back(name[i]);
-            }
+            string n(const name);
+            
+            //for (int i = 0; i < name_count; i++){
+                //n.push_back(name[i]);
+            //}
             return n;
         }
 
@@ -109,7 +110,7 @@ class Bakalavr: public Student{
         Bakalavr(int year, int ID, int a, string n, float score)
             : Student(year, ID, a, n), average_score(score){}
 
-        Bakalavr(Bakalavr& b) 
+        Bakalavr(const Bakalavr& b) 
             : Student(b), average_score(b.average_score){}
         
         void print_dop(ostream& out){
@@ -143,7 +144,7 @@ class Magistr: public Student{
         Magistr(int year, int ID, int a, string n, string t)
             : Student(year, ID, a, n), topic(t){}
 
-        Magistr(Magistr& m) 
+        Magistr(const Magistr& m) 
             : Student(m), topic(m.topic){}
         
         void print_dop(ostream& out){
