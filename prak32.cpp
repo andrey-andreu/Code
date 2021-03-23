@@ -4,7 +4,7 @@ using namespace std;
 class Student {
     protected:
         int start_year, student_ID, age, name_count;
-        char* name; // для того, чтобы "исскуственно" сделать абстракнтный класс неплоским
+        char* name; // для того, чтобы "искуственно" сделать абстракнтный класс неплоским
         static int count; // стчетчик студентов
     public:
         Student(){};
@@ -38,9 +38,9 @@ class Student {
         }
 
         // константный 'геттер' для количества студентов
-        const int get_count(const Student& s) const {return count;}
+        int get_count() const {return count;}
 
-        const string get_name()const {
+        string get_name()const {
             string n;
             for (int i = 0; i < name_count; i++){
                 n.push_back(name[i]);
@@ -53,7 +53,7 @@ class Student {
             count--;
         }
 
-        // у бакалавров формула подсчета года выпуска start_year + 4, у машистров start_year + 2
+        // у бакалавров формула подсчета года выпуска start_year + 4, у магистров start_year + 2
         virtual int finish_year(int s) = 0;
 
         // у бакалавров и магистров будут добавленые еще разные дополнительные переменные 
@@ -98,7 +98,7 @@ class Student {
 
 int Student::count = 0; // обнуляем счетчик студентов
 
-// далее студентов будем подразделять на бакаловров и магистрантов: у первых добавляется средний балл,
+// далее студентов будем подразделять на бакаловров и магистров: у первых добавляется средний балл,
 // у вторых тема работы
 
 class Bakalavr: public Student{
