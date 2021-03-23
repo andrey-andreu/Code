@@ -38,14 +38,10 @@ class Student {
         }
 
         // константный 'геттер' для количества студентов
-        int get_count() const {return count;}
+        static int get_count() const {return count;}
 
-        string get_name()const {
+        string get_name() const {
             string n(const name);
-            
-            //for (int i = 0; i < name_count; i++){
-                //n.push_back(name[i]);
-            //}
             return n;
         }
 
