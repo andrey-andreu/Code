@@ -11,7 +11,6 @@ class IntSeq{
         IntSeq(){}
         IntSeq(int *pSeq, int n){
             size = n;
-            mas = pSeq;
             mas = new int[n];
             for (int i =0; i < n; i++){
                 mas[i] = pSeq[i];
