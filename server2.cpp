@@ -12,9 +12,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <vector>
+#include <sys/wait.h>
 
 using namespace std;
-bool flag = false;
+
 const string Time() {
     struct tm *ptr;
     time_t a;
@@ -33,9 +34,9 @@ class Err{
         string where_is_error;
     public:
         Err() {}
-        Err(string er){where_is_error=er;}
+        Err(const string er){where_is_error=er;}
         void print_error() const{
-            cerr << where_is_error << '\n';
+            cerr << where_is_error << '\n' << errno << '\n';
         }
 };
 
@@ -105,20 +106,26 @@ class ConnectedSocket : public Socket {
   public:
     ConnectedSocket() = default;
     explicit ConnectedSocket(int sd) : Socket(sd) {};
+
     void Write(const string& str) {
         if (send(sd, &str[0], str.size(), 0) == -1)
             throw Err("Write's error");
     };
+
     void Write(const vector<uint8_t>& bytes) {
-        
+        if (send(sd, bytes.data(), bytes.size(), 0) == -1){
+            throw Err("Write2's error");
+        }
     };
+
     void Read(string& str) {
-        int buf_len = 1024;
+        int buf_len = 10240;
         char buf[buf_len];
         if (recv(sd, buf, buf_len, 0) == -1)
             throw Err("Read's error");
         str = buf;
     };
+
     void Read (vector<uint8_t>& bytes) {
        
     };
@@ -145,18 +152,16 @@ class HttpHeader{
 };
 
 class HttpRequest{ 
-        string referer, method, http;
+        string way, method, http;
         vector<string> name;
         vector<string> value;
-        int size; 
     public:
-        HttpRequest(vector<string>& s, int size_){
-            size = size_;
+        HttpRequest(vector<string>& s){
             int pos = s[0].find(" ");
             method = s[0].substr(0, pos);
             s[0].erase(0, pos+1);
             pos = s[0].find(" ");
-            referer = s[0].substr(0, pos);
+            way = s[0].substr(1, pos-1);
             http = s[0].substr(pos+1);
             for (int i = 1; i < s.size()-1; i++){
                 HttpHeader head(s[i]);
@@ -165,60 +170,134 @@ class HttpRequest{
             }
         }
 
-        const string get_http() const {return http;} 
-        const string get_referer() const {return referer;}
-        const string get_method() const {return method;}
+        string get_http() const {return http;} 
+        string get_way() const {return way;}
+        string get_method() const {return method;}
         vector<string> get_name() const {return name;}
         vector<string> get_value() const {return value;}
-        int get_size() const {return size;}
-
-        void print_referer() const {
-            cout << get_referer() << endl;
-        }
-        void print_http() const {
-            cout << get_http() << endl;
-        }
         
 };
 
 class HttpResponse{
-    string protocol, code, data;
-    string body;
+    string protocol, code, data, body;
+    vector<uint8_t> file;
+    size_t size;
     public:
-        HttpResponse(HttpRequest& req){
+        HttpResponse(const HttpRequest& req){
             data = Time();
             vector<string> n = req.get_name();
             vector<string> v = req.get_value();
-            body += req.get_http();
+            char c;
+            int fd;
+            bool CGI;
+
             if (req.get_method() == "GET"){
-                int fd = open(req.get_referer().c_str(), O_RDONLY);
-                if (fd == -1){
-                    code = " 404 Not Found";
-                    body += code;
-                    body += "\n";
-                    body += "Data: ";
-                    body += data;
-                    body += "\n";
-                } 
+                if (req.get_way().find("?") == std::string::npos)
+                    CGI = false;
+                else
+                    CGI = true;
+
+
+                if (CGI){
+
+                    string way = req.get_way();
+                    string CON = "CONTENT_TYPE=text/plain";
+                    string QUER = "QUERY_STRING=";
+                    string SADDR = "SERVER_ADDR=127.0.0.1";
+                    string SPORT = "SERVER_PROTOCOL=";
+                    string PORT = "SERVER_PORT=1234";
+                    string SCRNAME = "SCRIPT_NAME=";
+                    string quer, sname;
+                    int pos1 = way.find("?");
+                    sname = way.substr(0, pos1);
+                    quer = way;
+                    char** env = new char*[7];
+
+                    env[0] = new char[CON.size()];
+                    env[0] = (char *) CON.c_str();
+
+                    env[1] = new char[QUER.size() + quer.size()];
+                    string q1 = QUER + quer;
+                    env[1] = (char *) q1.c_str();
+
+                    cout << SADDR.size() << endl;
+                    env[2] = new char[SADDR.size()];
+                    env[2] = (char *) SADDR.c_str();
+
+                    env[3] = new char[SPORT.size()];
+                    string  sp = SPORT + req.get_http();
+                    env[3] = (char *) sp.c_str();
+
+                    env[4] = new char[PORT.size()];
+                    env[4] = (char *) PORT.c_str();
+
+                    env[5] = new char[SCRNAME.size() + sname.size()];
+                    string sc = SCRNAME + sname;
+                    env[5] = (char *) sc.c_str();
+                    env[6] = NULL;
+
+                    pid_t pid;
+                    int status;
+
+                    if ((pid = fork()) < 0) throw Err("Fork's error");
+                    else if (pid == 0){
+                        char** argv = new char*[2];
+                        argv[0] = new char[sname.size()];
+                        argv[0] = (char *) sname.c_str();
+                        argv[1] = NULL;
+                        cout << argv[0] << '\n';
+
+                        fd = open("temporary.txt", O_CREAT | O_TRUNC | O_WRONLY, 0644);
+                        if (fd == -1) throw Err("Temporary file's error");
+                        dup2(fd, 1);
+                        close(fd);
+                        execve(argv[0], argv, env);
+                        cout << "The program failed" << '\n';
+                        exit(6);
+                    }
+                    else{
+                        wait(&status);
+                        fd = open("temporary.txt", O_RDONLY);
+                        //if (fd == -1) throw Err("Temporary file's error 2");
+                        int i = 0;
+                        while(read(fd, &c, 1)) {
+                            file.push_back(c);
+                            cout << file[i];
+                            i++;
+                        }
+
+                        if (WIFEXITED(status) && (WEXITSTATUS(status) != 6))
+                            code = "HTTP/1.1 200 OK\0";
+                        else
+                            code = "HTTP/1.1 404 Not Found\0";
+                    }
+                }
                 else{
-                    code = " 200 Ok";
-                    body += code;
-                    body += "\n";
-                    body += "Data: ";
-                    body += data;
-                    body += "\n";
-                    for (int i=0; i < n.size(); i++){
-                        body += n[i];
-                        body += ": ";
-                        body += v[i];
-                        body += "\n";
-                     }
-                    body += "Content-Length: ";
-                    body += to_string(req.get_size());
-                    body += "\n";
+                    fd = open(req.get_way().c_str(), O_RDONLY);
+                    if (fd == -1){
+                        code = "HTTP/1.1 404 Not Found\0";
+                        close(fd);
+                        fd = open("404.png", O_RDONLY);
+                        if (fd == -1){
+                            throw Err("Papich's error");
+                        }
+                    } 
+                    else{
+                        code = "HTTP/1.1 200 OK\0";
+                    }
+                    while(read(fd, &c, 1)) {
+                        file.push_back(c);
+                    }
+                    
                 }
                 close(fd);
+                body = "\r\nVersion: HTTP/1.1\r\nContent-length: " + to_string(file.size()) + "\r\n\r\n";
+                
             }
+
+        }
+        vector<uint8_t> get_file() const {
+            return file;
         }
 
         string get_responce() const {
@@ -229,27 +308,26 @@ class HttpResponse{
             return code;
         }
 
-        friend ostream &operator<<(ostream &out, HttpResponse &res){
-            out << res.code << '\n';
-            return out;
-        }
+        int get_size() const {return size;}
+
 };
 
 vector<string> SplitLines(string& s) {
     vector<string> lines;
     int pos = 0;
     string line;
-    while ((pos = s.find("\n")) != std::string::npos) {
-        line = s.substr(0, pos);
-        lines.push_back(line);
+    int i = 0;
+    while ((pos = s.find("\r\n")) != std::string::npos) {
+        if (pos!=0){
+            line = s.substr(0, pos+1);
+            lines.push_back(line);
+        }
         s.erase(0, pos + 1);
     }
     lines.push_back(s);
-    if (lines[lines.size()-2].empty()){
-        flag = true;
-    }
     return lines;
 }
+
 
 void ProcessConnection(int cd, const SocketAddress& clAddr) {
     ConnectedSocket cs(cd);
@@ -257,10 +335,13 @@ void ProcessConnection(int cd, const SocketAddress& clAddr) {
     cs.Read(request);
     int s = request.size();
     vector<string> lines = SplitLines(request);
-    HttpRequest req(lines, s);
+    HttpRequest req(lines);
     HttpResponse res(req);
+    cout << res.get_responce() << '\n';
+    cs.Write(res.get_code());
     cs.Write(res.get_responce());
-    //cs.Shutdown();
+    cs.Write(res.get_file());
+    cs.Shutdown();
 }
 
 void ServerLoop() {
